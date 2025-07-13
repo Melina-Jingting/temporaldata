@@ -3019,11 +3019,14 @@ class Data(object):
         for key, value in file.items():
             if isinstance(value, h5py.Group):
                 class_name = value.attrs["object"]
-                if lazy and class_name != "Data":
-                    group_cls = globals()[f"Lazy{class_name}"]
+                if class_name == "Data":
+                    data[key] = Data.from_hdf5(value, lazy=lazy)
                 else:
-                    group_cls = globals()[class_name]
-                data[key] = group_cls.from_hdf5(value)
+                    if lazy:
+                        group_cls = globals()[f"Lazy{class_name}"]
+                    else:
+                        group_cls = globals()[class_name]
+                    data[key] = group_cls.from_hdf5(value)
             else:
                 # if array, it will be loaded no matter what, always prefer ArrayDict
                 data[key] = value[:]
