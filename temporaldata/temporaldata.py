@@ -8,6 +8,7 @@ import logging
 import h5py
 import numpy as np
 import pandas as pd
+from scipy.interpolate import interp1d
 
 
 class ArrayDict(object):
@@ -719,6 +720,67 @@ class IrregularTimeSeries(ArrayDict):
         out = self.select_by_mask(mask)
         out._domain = out._domain & interval
         return out
+
+    def get_regular_time_series_array(
+        self, sampling_rate, raw_array_name, is_index=False
+    ):
+        """
+        Convert an IrregularTimeSeries attribute to a regular time grid.
+
+        Args:
+            irregular: IrregularTimeSeries object
+            sampling_rate: float, Hz
+            raw_array_name: str, attribute to convert (e.g., 'vel', 'raw')
+            is_index: bool, if True, treat as spike indices; else interpolate
+
+        Returns:
+            regular_array: np.ndarray, shape (num_bins, ...) or (num_units, num_bins)
+            regular_times: np.ndarray, shape (num_bins,)
+        """
+        bin_size = 1 / sampling_rate
+        start = np.floor(self.domain.start[0] / bin_size) * bin_size
+        end = np.ceil(self.domain.end[-1] / bin_size) * bin_size
+        num_bins = int(np.ceil((end - start) / bin_size))
+        regular_times = np.arange(num_bins) * bin_size + start
+
+        arr = getattr(self, raw_array_name)
+        timestamps = self.timestamps
+
+        if is_index:
+            # arr shape: (N, ...) where N = len(timestamps)
+            num_units = arr.max() + 1
+            binned = np.zeros((num_bins, num_units), dtype=int)
+            bin_index = np.floor((timestamps - start) * sampling_rate).astype(int)
+            valid = (bin_index >= 0) & (bin_index < num_bins)
+            np.add.at(binned, (bin_index[valid], arr[valid]), 1)
+            return binned, regular_times
+        else:
+            # arr shape: (N, ...) where N = len(timestamps)
+            if arr.ndim == 1:
+                interp_func = interp1d(
+                    timestamps,
+                    arr,
+                    kind="linear",
+                    bounds_error=False,
+                    fill_value="extrapolate",
+                )
+                regular_arr = interp_func(regular_times)
+            else:
+                # Interpolate each column separately
+                regular_arr = np.stack(
+                    [
+                        interp1d(
+                            timestamps,
+                            arr[:, i],
+                            kind="linear",
+                            bounds_error=False,
+                            fill_value="extrapolate",
+                        )(regular_times)
+                        for i in range(arr.shape[1])
+                    ],
+                    axis=1,
+                )
+            return regular_arr, regular_times
 
     def add_split_mask(self, name: str, interval: Interval):
         """Adds a boolean mask as an array attribute, which is defined for each
@@ -1988,8 +2050,9 @@ class Interval(ArrayDict):
         """
 
         assert len(sizes) > 1, "must split into at least two sets"
-        assert len(sizes) < len(self), f"cannot split {len(self)} intervals into "
-        " {len(sizes)} sets"
+        assert len(sizes) < len(
+            self
+        ), f"cannot split {len(self)} intervals into {len(sizes)} sets"
 
         # if sizes are floats, convert them to integers
         if all(isinstance(x, float) for x in sizes):
