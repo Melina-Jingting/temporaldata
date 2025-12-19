@@ -898,6 +898,10 @@ class Interval(ArrayDict):
 
         return Interval(start=start, end=end)
 
+    def __sub__(self, other):
+        """Alias for the `difference` method to compute interval difference using the `-` operator."""
+        return self.difference(other)
+
 
 class LazyInterval(Interval):
     r"""Lazy variant of :obj:`Interval`. The data is not loaded until it is accessed.
